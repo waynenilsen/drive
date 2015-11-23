@@ -18,3 +18,12 @@ regex = "0.1.41"
 rustc-serialize = "0.3.16"
 sodiumoxide = "0.0.9"
 time = "~0.1.34"
+
+# todo : add bin section. 
+[[bin]]
+name = "drive_bin"
+path = "src/main.rs"
+
+[lib]
+name="drive"
+path="src/lib.rs"

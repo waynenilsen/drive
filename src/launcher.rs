@@ -41,38 +41,38 @@ fn slice_equal(lhs: &[u8], rhs: &[u8]) -> bool {
 }
 
 #[derive(Debug, RustcEncodable)]
-struct HandshakeJson {
+pub struct HandshakeJson {
     endpoint: String,
     data: HandshakeData,
 }
 
 #[derive(Debug, RustcEncodable)]
-struct HandshakeData {
+pub struct HandshakeData {
     launcher_string: String,
     asymm_nonce: String,
     asymm_pub_key: String,
 }
 
 #[derive(Debug, RustcDecodable)]
-struct HandshakeResponse {
+pub struct HandshakeResponse {
     id: String,
     data: HandshakeResponseData,
 }
 
 #[derive(Debug, RustcDecodable)]
-struct HandshakeResponseData {
+pub struct HandshakeResponseData {
     encrypted_symm_key: String,
     launcher_public_key: String,
 }
 
 #[derive(Debug, RustcEncodable)]
-struct CreateDir {
+pub struct CreateDir {
     endpoint: String,
     data: CreateDirData,
 }
 
 #[derive(Debug, RustcEncodable)]
-struct CreateDirData {
+pub struct CreateDirData {
     is_path_shared: bool,
     dir_path: String,
     is_private: bool,
@@ -81,64 +81,64 @@ struct CreateDirData {
 }
 
 #[derive(Debug, RustcDecodable)]
-struct GenericResponse {
+pub struct GenericResponse {
     id: String,
     error: ErrorData,
 }
 
 #[derive(Debug, RustcDecodable)]
-struct ErrorData {
+pub struct ErrorData {
     code: i64,
     description: String,
 }
 
 #[derive(Debug, RustcEncodable)]
-struct GetDir {
+pub struct GetDir {
     endpoint: String,
     data: GetDirData,
 }
 
 #[derive(Debug, RustcEncodable)]
-struct GetDirData {
+pub struct GetDirData {
     timeout_ms: i64,
     is_path_shared: bool,
     dir_path: String,
 }
 
 #[derive(Debug, RustcDecodable)]
-struct GetDirResponse {
+pub struct GetDirResponse {
     id: String,
     data: GetDirResponseData,
 }
 
 #[derive(Debug, RustcDecodable)]
-struct GetDirResponseData {
-    info: DirInfo,
-    sub_directories: Vec<DirInfo>,
-    files: Vec<FileInfo>,
+pub struct GetDirResponseData {
+    pub info: DirInfo,
+    pub sub_directories: Vec<DirInfo>,
+    pub files: Vec<FileInfo>,
 }
 
 #[derive(Debug, RustcDecodable)]
-struct DirInfo {
-    name: String,
-    creation_time_sec: i64,
-    creation_time_nsec: i64,
-    modification_time_sec: i64,
-    modification_time_nsec: i64,
-    is_private: bool,
-    is_versioned: bool,
-    user_metadata: String,
+pub struct DirInfo {
+    pub name: String,
+    pub creation_time_sec: i64,
+    pub creation_time_nsec: i64,
+    pub modification_time_sec: i64,
+    pub modification_time_nsec: i64,
+    pub is_private: bool,
+    pub is_versioned: bool,
+    pub user_metadata: String,
 }
 
 #[derive(Debug, RustcDecodable)]
-struct FileInfo {
-    name: String,
-    size: i64,
-    creation_time_sec: i64,
-    creation_time_nsec: i64,
-    modification_time_sec: i64,
-    modification_time_nsec: i64,
-    user_metadata: String,
+pub struct FileInfo {
+    pub name: String,
+    pub size: i64,
+    pub creation_time_sec: i64,
+    pub creation_time_nsec: i64,
+    pub modification_time_sec: i64,
+    pub modification_time_nsec: i64,
+    pub user_metadata: String,
 }
 
 pub struct Launcher {
@@ -253,7 +253,15 @@ impl Launcher {
 		}
 	}
 	
-	pub fn mkdir(&mut self, create_dir_data : CreateDirData) {
+	pub fn mkdir(
+			&mut self, 
+			is_path_shared: bool,
+			dir_path: &String,
+			is_private: bool,
+			is_versioned: bool,
+			user_metadata: String
+			)
+		{
 		// --------------------------------------------------------------------------------
 		//                         Create a Directory - NFS operation
 		// --------------------------------------------------------------------------------
@@ -261,7 +269,13 @@ impl Launcher {
 
 		let create_dir = CreateDir {
 			endpoint: "safe-api/v1.0/nfs/create-dir".to_string(),
-			data: create_dir_data,
+			data: CreateDirData {
+				is_path_shared: is_path_shared,
+				dir_path: (*dir_path).to_owned(),
+				is_private: is_private,
+				is_versioned: is_versioned,
+				user_metadata: user_metadata
+			},
 		};
 
 		// Encode the request as a JSON.
@@ -307,7 +321,11 @@ impl Launcher {
 
 	}
 	
-	pub fn listdir(&self, get_dir_data : GetDirData) -> GetDirResponse {
+	pub fn listdir(&mut self, 
+			timeout_ms: i64,
+			is_path_shared: bool,
+			dir_path: &String
+			) -> Result<GetDirResponseData, ErrorData> {
 		// --------------------------------------------------------------------------------
 		//                  Fetch the created Directory - NFS operation
 		// --------------------------------------------------------------------------------
@@ -315,7 +333,11 @@ impl Launcher {
 
 		let get_dir_req = GetDir {
 			endpoint: "safe-api/v1.0/nfs/get-dir".to_string(),
-			data: get_dir_data,
+			data: GetDirData {
+				timeout_ms: timeout_ms,
+				is_path_shared: is_path_shared,
+				dir_path: (*dir_path).to_owned(),
+			},
 		};
 
 		// Encode the request as a JSON
@@ -326,21 +348,21 @@ impl Launcher {
 		let json_str_bytes = json_str.into_bytes();
 		// Encrypt the raw bytes using the secret key.
 		let encrypted_json_str_bytes = sodiumoxide::crypto::secretbox::seal(&json_str_bytes,
-																			&symm_nonce,
-																			&symm_key);
+																			&self.symm_nonce,
+																			&self.symm_key);
 
 		// Calculate and store the id which we will expect as response id given by Launcher for this
 		// request - similary to what we had done earlier.
 		let response_id = sodiumoxide::crypto::hash::sha512::hash(&encrypted_json_str_bytes);
 		// Send encrypted JSON request to Launcher.
-		ipc_stream.write(encrypted_json_str_bytes);
+		self.ipc_stream.write(encrypted_json_str_bytes);
 
 		// Wait for Launcher's response
-		let response = ipc_stream.read_payload();
+		let response = self.ipc_stream.read_payload();
 		// Decrypt Launcher's response - just like before.
 		let decrypted_response = sodiumoxide::crypto::secretbox::open(&response,
-																	  &symm_nonce,
-																	  &symm_key).ok().unwrap();
+																	  &self.symm_nonce,
+																	  &self.symm_key).ok().unwrap();
 		println!("App: GetDir Response decrypted.");
 
 		// Get it into a valid UTF-8 String - this will be the JSON response.
@@ -349,24 +371,28 @@ impl Launcher {
 
 		// Decode the JSON into expected response structure - in this case a directory response as
 		// stated in the RFC.
-		let get_dir_response: GetDirResponse = rustc_serialize::json::decode(&decrypted_response_json_str)
-																	 .unwrap_or_else(|e| panic!("{:?}", e));
-		println!("App: GetDir Response decoded.");
+		match rustc_serialize::json::decode::<GetDirResponse>(&decrypted_response_json_str) {
+			Ok(get_dir_response) => {
+				println!("App: GetDir Response decoded.");
 
-		// Extract the response id given by Launcher.
-		let rxd_id_vec = get_dir_response.id.from_base64().ok().unwrap();
-		// Check this against the id that we had calculated earlier - should be same.
-		assert!(slice_equal(&rxd_id_vec, &response_id.0[..]));
+				// Extract the response id given by Launcher.
+				// let rxd_id_vec= get_dir_response.id.from_base64().ok().unwrap();
+				// Check this against the id that we had calculated earlier - should be same.
+				// assert!(slice_equal(&rxd_id_vec, &response_id.0[..]));
 
-		// Print the directory information.
-		println!("App: Response: {:?}", get_dir_response);
-		println!("App: Exiting test app...");
-		println!("\n======================================================");
-		
-		get_dir_response
+				// Print the directory information.
+				println!("App: Response: {:?}", get_dir_response);
+				Ok(get_dir_response.data)
+			},
+			Err(_) => {
+				let err_response : GenericResponse = rustc_serialize::json::decode(&decrypted_response_json_str).unwrap();
+				Err(err_response.error)
+			}
+		}
 	}
 }
 
+/*
 fn main() {
 
     println!("\n======================================================\n");
@@ -384,7 +410,7 @@ fn main() {
     // Read the command line argument that Launcher starts this application with
     let main_arg = arg_vec[2].clone();
     
-    let mut helper = Launcher::new(main_arg);
+    let mut helper = Launcher::new(&*main_arg);
     
     helper.mkdir(CreateDirData{
 		is_path_shared: false,
@@ -392,11 +418,12 @@ fn main() {
 		is_private: true,
 		is_versioned: false,
 		user_metadata: "none".into(),
-	})
+	});
 	
 	helper.listdir(GetDirData{
 		timeout_ms: 100,
 		is_path_shared: false,
 		dir_path: "/dummy".into(),
-	})
+	});
 }
+*/
